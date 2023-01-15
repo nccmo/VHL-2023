@@ -1,0 +1,716 @@
+---
+title: "Make_heatmap_and_bar_plot_for_mutation_frequency"
+author: "Mariko Tabata"
+date: "2021-11-19"
+output: 
+  html_document: 
+    fig_width: 8
+editor_options: 
+  chunk_output_type: console
+---
+
+# Purpose
+Make mutational landscape (heatmap)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(error = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+##########
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+##########
+```
+
+```{r load libraries}
+library(tidyverse)
+library(cowplot)
+library(RColorBrewer)
+theme_set(theme_cowplot())
+```
+
+```{r setup2}
+# time stamp and output directory creation -------------
+tst <- "23-01-14"
+dir_table <- str_glue("result/table/{tst}")
+dir_pdf <- str_glue("result/pdf/{tst}")
+dir.create(dir_table, showWarnings = F, recursive = T)
+dir.create(dir_pdf, showWarnings = F, recursive = T)
+```
+
+```{r load samplelist and add driver CNV information and save}
+
+this_dataset_type <- "primary_metastatic"
+
+df_sample <-  read_tsv("../../../../sample/mt_vhl_sample_list_220321.txt") %>% 
+  filter(realtumor1not0 == 1) %>% 
+  arrange(figure_id)
+
+  df_mut <- read_tsv("./../pileupx/result/pileupx/summary/table/21-08-21/primary_metastatic_clonal_subclonal/same_drivergene_func_summarized.txt") %>% 
+    filter(figure_id %in% df_sample$figure_id)
+  
+  df_mut_num <- read_tsv("./../pileupx/result/pileupx/summary/table/21-08-21/primary_metastatic_clonal_subclonal/mutation_summary.txt") %>% 
+    filter(figure_id %in% df_sample$figure_id)
+# }
+
+head(df_sample)
+
+df_sample %>% nrow()
+
+head(df_mut)
+
+nrow(df_mut) == nrow(df_sample)
+
+head(df_mut_num)
+
+nrow(df_mut_num)　== nrow(df_sample)
+
+df_cna <- read_tsv("../../CNACS/result/CopyNumberAnalysis/table/Cytoband/2021-01-04/driver_CNA.txt") %>% 
+  select(df_sample$sampleid, cna)
+
+df_cna %>% dim()
+
+head(df_cna)
+
+blc_cutoff <- c("arm_0.5", "arm_0.7", "chrom_0.5")
+
+j = 1
+
+this_blc_cutoff <- blc_cutoff[j]
+
+if (j == 1) {
+  df_cna_arm_focal <- read_tsv("./../../CNACS/result/CopyNumberAnalysis/Devide_focal_arm_CNVs/table/2021-09-02/0.5_subclonal_clonal_primary_metastatic_focal_arm_cnas.txt") %>%
+  filter(sample %in% df_sample$sampleid)
+}
+
+if (j == 2) {
+    df_cna_arm_focal <- read_tsv("./../../CNACS/result/CopyNumberAnalysis/Devide_focal_arm_CNVs/table/2021-09-02/0.7_subclonal_clonal_primary_metastatic_focal_arm_cnas.txt") %>%
+  filter(sample %in% df_sample$sampleid)
+}
+
+
+if (j == 3) {
+  df_cna_arm_focal <- read_tsv("./../../CNACS/result/CopyNumberAnalysis/Devide_focal_arm_CNVs/table/2021-09-01/subclonal_clonal_primary_metastatic_focal_arm_cnas.txt") %>%
+  filter(sample %in% df_sample$sampleid)
+}
+
+head(df_cna_arm_focal)
+
+df_ploidy <- read_tsv("../../CNACS/result/ploidy/table/22-03-24/ploidy.txt") %>%
+  select(sampleid, ploidy)
+
+head(df_ploidy) 
+
+```
+
+```{r modify the driver mutation list}
+head(df_mut)
+
+colnames(df_mut)
+
+result <- tibble()
+
+for (i in 2:ncol(df_mut)) {
+  # i = 3
+  this_df <- df_mut[,c(1,i)]
+  func <- str_remove(colnames(this_df)[2],"(^.*)_")
+  gene <- str_remove(colnames(this_df)[2],"_(.*$)")
+  this_df_mod <- this_df %>% 
+    mutate(gene = gene) %>% 
+    mutate(func = func)
+  this_df_mod2 <- this_df_mod[this_df_mod[,2] > 0,]
+  colnames(this_df_mod2) <- c("figure_id","vaf","gene","func")
+  result <- rbind(result, this_df_mod2) %>%
+    as_tibble()
+}
+
+head(result)
+
+mut_result <- result %>%
+  dplyr::select(-vaf) 
+
+mut_result %>%
+  write_tsv(str_glue("{dir_table}/{this_dataset_type}_mutation_input.txt"))
+
+```
+
+```{r modify the driver cna list}}
+
+sampleid <- colnames(df_cna)[grep("^MRCC",colnames(df_cna))]
+
+sampleid
+
+df_cna_mod <- df_cna[,grep("^MRCC",colnames(df_cna))] %>%
+  t() %>%
+  as_tibble() 
+
+colnames(df_cna_mod) <- df_cna$cna
+
+df_cna_mod2 <- df_cna_mod %>% 
+  mutate(sampleid = sampleid)
+
+head(df_cna_mod2)
+
+driver_cna <- df_cna$cna
+
+cna_result <- tibble()
+
+for (j in seq_along(driver_cna)) {
+  this_cna <- driver_cna[j]
+  
+  df_this_cna <- df_cna_mod2[c(ncol(df_cna_mod2),j)] %>%
+    # as.data.frame() %>% 
+    mutate(cna = this_cna)
+  
+  df_this_cna2 <- df_this_cna[!df_this_cna[,this_cna] == "2" ,]
+  
+  colnames(df_this_cna2) <- c("sampleid","cn","cna")
+  
+  cna_result <- rbind(cna_result, df_this_cna2) %>%
+    as_tibble()
+}
+
+cna_result %>% 
+  write_tsv(str_glue("{dir_table}/{this_dataset_type}_cna_input.txt"))
+```
+
+```{r modify df_ploidy}
+WGD_thres <- 2.5
+
+df_ploidy2 <- df_ploidy %>%
+  mutate(WGD = if_else(ploidy > WGD_thres, "WGD", "NA"))
+
+df_sample_WGD <- left_join(df_sample, df_ploidy2, by = "sampleid")
+```
+
+
+```{r combine mutation and sample file}
+
+df_sample_mut <- df_sample_WGD %>% 
+  mutate(gene_expression = case_when(RNA_seq == 1 & nCounter == 1~"both",
+                                     RNA_seq == 0 & nCounter == 1~"nCounter",
+                                     RNA_seq == 1 & nCounter == 0~"RNA-seq")) %>%
+  select( "sampleid" ,
+          "figure_id",
+          "WGD",
+          "Fuhrman_grade" ,
+          "tumor_size",
+          "overallstage",
+          "age_at_surgery",
+          "operation_number",
+          "germ_VHL",
+          "gene_expression",
+  )
+
+driver_gene <- mut_result$gene %>% unique()
+
+driver_gene
+
+# Combine the driver_mutation information dataframe to "df_sample_mut".
+for (h in seq_along(driver_gene)) {
+  this_gene <- driver_gene[h]
+  this_mut_result <- mut_result %>% 
+    filter(gene == this_gene) %>% 
+    dplyr::select(figure_id, func)
+  colnames(this_mut_result) <- c("figure_id", this_gene)
+  df_sample_mut <- left_join(df_sample_mut, this_mut_result, by = "figure_id")
+  
+}
+
+head(df_sample_mut)
+```
+
+```{r combine cna list with mutation and sample file}
+
+head(cna_result)
+
+driver_cna <- cna_result$cna %>% unique()
+
+df_sample_mut_cna <- df_sample_mut
+
+for (k in seq_along(driver_cna)) {
+  this_cna <- driver_cna[k]
+  this_cna_result <- cna_result %>% 
+    filter(cna == this_cna) %>% 
+    dplyr::select(sampleid, cn)
+  colnames(this_cna_result) <- c("sampleid", this_cna)
+  df_sample_mut_cna <- left_join(df_sample_mut_cna, this_cna_result, by = "sampleid")
+  
+}
+
+head(df_sample_mut_cna)
+
+df <- df_sample_mut_cna %>% 
+  as.data.frame() 
+
+# Save
+df %>% 
+  write_tsv(str_glue("{dir_table}/{this_dataset_type}_driver_alt.txt"))
+
+```
+
+```{r change the values of df_sample_mut_cna into color }
+
+df_cnv <- df %>%
+  select(starts_with("gain"), starts_with("loss")) %>%
+  mutate_all(~case_when(.>2~"gain",
+                        .<2~"loss",
+                        TRUE~NA_character_))
+
+df2 <- df %>%
+  select( -starts_with("gain"),
+          -starts_with("loss")) %>%
+  cbind(df_cnv) %>% 
+  mutate(Tumor_size = case_when(tumor_size <= 4~"small",
+                                tumor_size > 7~"large",
+                                TRUE~"medium"
+  )) %>%
+  mutate(Age_at_surgery = case_when(age_at_surgery < 40~"young",
+                                    age_at_surgery  >= 60~"old",
+                                    TRUE~"middle")) %>%
+  mutate(num_surgery = case_when(operation_number == 1~"first",
+                                operation_number == 2~"second",
+                                operation_number == 3~"third")) %>%
+  
+  select(sampleid,
+         figure_id,
+         germ_VHL,
+         all_of(driver_gene),
+         starts_with("gain"),
+         starts_with("loss"),
+         WGD,
+         Fuhrman_grade,
+         Tumor_size,
+         overallstage,
+         Age_at_surgery,
+         num_surgery,
+         gene_expression
+         
+  )
+
+#Save 
+df_driver_event  <- df2 %>% 
+  dplyr::select(-figure_id)
+
+df_driver_event %>% 
+write_tsv(str_glue("{dir_table}/{this_dataset_type}_driver_event.txt"))
+```
+
+```{r make the matrix on driver alteration as the input for the heatmap}
+
+mat <- df2 %>% 
+  dplyr::select(-figure_id,-sampleid) %>%
+  as.matrix() 
+
+rownames(mat) <- df2$figure_id
+
+mat2 <- t(mat)
+
+head(mat2)
+#If you need to arrange, arrange mat2.
+mat2
+
+```
+
+```{r add df_driver_event the tumor name}
+
+rownames(df_sample) <- df_sample$sampleid
+
+head(df_driver_event)
+
+rownames(df_driver_event) <- df_driver_event$sampleid
+
+df_driver_event <- df_driver_event[rownames(df_sample),]
+
+df_driver_event_mod <- df_driver_event %>% 
+  mutate(tumor = df_sample$tumor)
+
+df_driver_event_mod2 <- df_driver_event_mod %>%
+  
+  dplyr::select(germ_VHL, all_of(driver_gene), all_of(driver_cna)) %>% 
+  
+  mutate_all(~case_when(is.na(.)~0,
+                        .>0~1,
+                        TRUE~1))
+
+df_driver_event_mod2
+
+df_driver_event_mod3 <- df_driver_event_mod2 %>%
+  mutate_all(funs(as.numeric)) %>% 
+  mutate(tumor = df_driver_event_mod$tumor)
+
+df_driver_event_mod4 <- df_driver_event_mod3 %>%
+  dplyr::select(-tumor)
+
+df_driver_event_by_tumor <- aggregate(x = df_driver_event_mod4, by = list(Category = df_driver_event_mod3$tumor), FUN = sum)
+Tumor_name <- df_driver_event_by_tumor$Category
+
+df_driver_event_by_tumor[df_driver_event_by_tumor > 0] <- 1
+
+df_driver_event_by_tumor %>%
+  mutate(tumor = Tumor_name) %>%
+  dplyr::select(-Category) %>% 
+  write_tsv(str_glue("{dir_table}/{this_dataset_type}_driver_alt_by_tumor.txt"))
+
+df_driver_event_by_tumor2 <- df_driver_event_by_tumor %>%
+  dplyr::select(-Category) %>%
+  apply(2, function(x){sum(x)/nrow(df_driver_event_by_tumor)*100}) %>% 
+  as.data.frame()
+
+colnames(df_driver_event_by_tumor2) <- "Frequency"
+
+df_driver_event_by_tumor3 <- df_driver_event_by_tumor2 %>%
+  mutate(alt = rownames(df_driver_event_by_tumor2))
+
+rownames(df_driver_event_by_tumor3) <- rownames(df_driver_event_by_tumor2)
+
+# Arrange the order of df_driver_event_by_tumor3 so as to be in the same order of the heatmap.
+gain <- df_driver_event_by_tumor3$alt[grep("^gain",df_driver_event_by_tumor3$alt)]
+loss <- df_driver_event_by_tumor3$alt[grep("^loss",df_driver_event_by_tumor3$alt)]
+
+df_mutations <- df_driver_event_by_tumor3 %>% 
+  filter(!alt %in% c(gain, loss)) %>% 
+  arrange(desc(Frequency)) %>% 
+  select(alt) 
+
+df_mutations
+
+mutations <- df_mutations$alt
+
+mutations
+
+df_driver_event_by_tumor3
+
+df_driver_event_by_tumor3 <- df_driver_event_by_tumor3[c(
+  mutations,loss,gain),]
+
+df_driver_event_by_tumor3 %>% 
+  write_tsv(str_glue("{dir_table}/{this_dataset_type}_driver_alt_frequency.txt"))
+```
+
+```{r arrange the order of the driver alterations }
+
+df_driver_event_by_tumor3
+
+df_driver_event_by_tumor3 <- df_driver_event_by_tumor3[c(1,5,2:4,6:nrow(df_driver_event_by_tumor3)),]
+```
+
+```{r ggplot dor the frequency bar plot}
+
+g <- df_driver_event_by_tumor3 %>%
+  mutate(alt = fct_inorder(alt)) %>% 
+  ggplot() +
+  geom_bar(mapping = aes(x = fct_rev(alt), y = Frequency),
+           fill = "#708090",
+           color = "white",
+           stat = "identity",
+           width = 1) +
+  coord_flip() +
+  labs(x = "Alteration",
+       y = "Frequency") +
+  theme_cowplot() +
+  scale_y_continuous(expand = c(0, 0),
+                     limits = c(0, 100)
+  ) +
+  scale_x_discrete(expand = expansion(mult = c(0,0)))
+
+g
+
+ggsave(str_glue("{dir_pdf}/{this_dataset_type}_alt_freq_barplot.pdf"))
+
+```
+
+```{r draw heatmap}
+#ratio of rectangle
+lon <- 8 
+sid <- 3
+
+# overallstage
+cols_overallstage <- brewer.pal(8, "YlGnBu")
+cols_overallstage <- cols_overallstage[-c(1, 2, 4, 7, 8)] 
+
+cols_overallstage
+
+# age
+cols_age <- brewer.pal(9, "PuBu")
+cols_age <- cols_age[-c(1, 2, 3, 5, 7, 9)] 
+
+cols_age
+
+# gene_expression
+cols_gene_expression <- brewer.pal(11, "RdYlBu")
+cols_gene_expression <- cols_gene_expression[-c(1, 2, 3, 4, 5, 7,9, 11)] 
+
+cols_gene_expression
+
+
+# define color list
+color_list <- c(
+  "gain" = "#A52436",
+  "NA" = "#ffffff",
+  "loss" = "navy",
+  "deletion" = "navy",
+  "frameshift deletion" = "firebrick1",
+  "frameshift insertion" = "firebrick1",
+  "frameshift substitution" = "firebrick1",
+  "nonsynonymous SNV" = "steelblue3",# This should be missense mutation
+  "stopgain" = "darkgoldenrod1",
+  "splicing" = "violet",
+  "Multiple"  = "chartreuse3",
+  "WGD" = "#FF1000", 
+  "grade_1" = "#FFDB9E",
+  "grade_2" = "#FEB24C",
+  "grade_3" =  "#E47432",
+  "small" = "#807DBA",
+  "medium" =  "#6A51A3",
+  "large" = "#54278F",
+  "young" = "#A6BDDB",
+  "middle" = "#3690C0",
+  "old" = "#045A8D",
+  "first" = "#EFBCD1",
+  "second" = "#E07EA7",
+  "third" = "#D3417E",
+  "stage_1" = "#C7E9B4",
+  "stage_3" = "#41B6C4",
+  "stage_4" =  "#1D91C0",
+  "nCounter" = "#ABD9E9",
+  "RNA-seq" = "#FFFFBF",
+  "both" = "#4575B4"
+)
+
+# Matrix
+# arrange the order of the driver gene according to it's frequency in mat_mut same as bar plot.
+
+row_order <- c(rownames(df_driver_event_by_tumor3),
+               "WGD",
+               "Fuhrman_grade",
+               "Tumor_size",
+               "overallstage",
+               "Age_at_surgery",
+               "num_surgery",
+               "gene_expression")
+
+mat_mut <- as.data.frame(mat2)[row_order,]
+
+mat_mut <- mat_mut %>% as.matrix()
+
+
+# Length
+gene_len <- dim(mat_mut)[1]
+sample_len <- dim(mat_mut)[2]
+my_xlim <- (sample_len  * sid )
+my_ylim <- (gene_len * lon )
+
+
+# Draw PDF --------------------
+
+pdf(str_glue("{dir_pdf}/{this_dataset_type}_heatmap_{tst}.pdf"),
+    width = my_xlim / 10, height = my_ylim / 10)
+par(mar = c(5, 2, 2, 2))
+
+# Dummy
+plot.new()
+plot(NULL, NULL, xlim = c(-40, my_xlim),ylim = c(-50, my_ylim),
+     axes = FALSE, xlab = "", ylab = "")
+# Background of gene name
+for (i in 1:gene_len) {
+  par(new = T)
+  rect(-25 ,((gene_len*lon) - (i*lon)) ,sample_len*sid ,((gene_len*lon) - (i*lon) + lon),
+       col = "#ffffff", 
+       border = "gray80",
+       lwd = 0.01)
+}
+
+for (i in 1:gene_len) {
+  # i=1
+  for (j in 1:sample_len) {
+    # j =2
+    par(new = T)
+    rect(xleft = (j - 1)*sid,
+         ybottom = (gene_len * lon) - (i*lon),
+         xright = j*sid,
+         ytop = (gene_len*lon) - (i*lon) + lon, 
+         col = color_list[(mat_mut[i,j])],
+         border = "gray80",
+         lwd = 0.01,
+    )
+  }
+}
+
+# Gene name
+for (k in seq_along(c("germ_VHL",driver_gene))) {
+  par(font = 1)# make the gene names italic.
+  # par(new=T)
+  text(-1, (gene_len * lon) - (k*lon - (lon*0.5)), rownames(mat_mut)[k], adj = 1, cex = 1)
+}
+num_snvs <- length(c("germ_VHL",driver_gene)) + 1
+
+for (l in num_snvs:nrow(mat2)) {
+  par(font = 1) # make the gene names not italic.
+  # par(new=T)
+  text(-1, (gene_len * lon) - (l*lon - (lon*0.5)), rownames(mat_mut)[l], adj = 1, cex = 1)
+}
+
+# Cell name
+for (k in 1:sample_len) {
+  par(new = T)
+  text(k*sid - (sid*0.5), -1 , colnames(mat_mut)[k], adj = 1, cex = 1, srt = 90)
+}
+
+#Legend
+labels = c("Stopgain","Missense", "Farameshift indel",
+           "Splicing", "Multiple", "Deletion")
+leg_col = c(color_list["stopgain"][[1]], color_list["nonsynonymous SNV"][[1]],
+            color_list["frameshift deletion"][[1]], color_list["splicing"][[1]],
+            color_list["multiple"][[1]], color_list["deletion"][[1]]
+)
+par(new = T)
+legend(-25, -35, legend = labels, col = leg_col, pch = 15, ncol = 2, cex = 1)
+
+labels = c("Deletion","Amplification")
+leg_col = c(color_list["loss"][[1]], color_list["gain"][[1]])
+par(new = T)
+legend(40, -35, legend = labels, col = leg_col, pch = 15, ncol = 1, cex = 1)
+
+labels = "WGD"
+leg_col = color_list["WGD"][[1]]
+par(new = T)
+legend(90, -35, legend = labels, col = leg_col, pch = 15, ncol = 2, cex = 1)
+
+labels = c("1","2", "3")
+leg_col = c(color_list["grade_1"][[1]], color_list["grade_2"][[1]],
+            color_list["grade_3"][[1]])
+par(new = T)
+legend(120, -35, legend = labels, col = leg_col, pch = 15, ncol = 2, cex = 1)
+
+labels = c("<4cm", "<7cm","=>7cm")#There are no tumors more than 10cm
+leg_col = c(color_list["small"][[1]], color_list["medium"][[1]], color_list["large"][[1]])
+par(new = T)
+legend(-25, -50, legend = labels, col = leg_col, pch = 15, ncol = 2, cex = 1)
+
+labels = c("1","2", "4")
+leg_col = c(color_list["stage_1"][[1]], color_list["stage_3"][[1]],
+            color_list["stage_4"][[1]])
+par(new = T)
+legend(40, -55, legend = labels, col = leg_col, pch = 15, ncol = 2, cex = 1)
+
+
+
+labels = c("<40","<60",">=60")
+leg_col = c(color_list["young"][[1]], color_list["middle"][[1]],
+            color_list["old"][[1]])
+par(new = T)
+legend(70, -50, legend = labels, col = leg_col, pch = 15, ncol = 2, cex = 1)
+
+labels = c("First","Second", "Third")
+leg_col = c(color_list["first"][[1]], color_list["second"][[1]],
+            color_list["third"][[1]])
+par(new = T)
+legend(90, -50, legend = labels, col = leg_col, pch = 15, ncol = 2, cex = 1)
+
+labels = c("RNA-seq","nCounter", "Both")
+leg_col = c(color_list["RNA-seq"][[1]], color_list["nCounter"][[1]],
+            color_list["both"][[1]])
+par(new = T)
+legend(120, -50, legend = labels, col = leg_col, pch = 15, ncol = 2, cex = 1)
+
+
+dev.off()
+```
+
+```{r ggplot  non-silent mutation number bar plot}
+
+mutation_number2 <- fct_relevel(df_mut_num$figure_id, colnames(mat_mut))
+
+df_mut_num2 <- df_mut_num %>%
+  mutate(figure_id = mutation_number2)
+
+gg <- df_mut_num2 %>%
+  ggplot() +
+  geom_bar(mapping = aes(x = figure_id, y = mutation_number),
+           fill = "#708090",
+           color = "white",
+           stat = "identity",
+           width = 1) +
+  labs(x = "samples",
+       y = "No. of mutations") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_y_continuous(expand = c(0, 0),
+                     limits = c(0, 75)
+  ) +
+  scale_x_discrete(expand = expansion(mult = c(0,0)))
+
+gg
+
+ggsave(str_glue("{dir_pdf}/{this_dataset_type}_mut_num_barplot.pdf"))
+
+```
+
+```{r ggplot　number of CNAs bar plot}
+
+head(df_cna_arm_focal)
+
+df_cna_arm_focal2 <- df_cna_arm_focal %>%
+  group_by(sample, cna_type) %>%
+  count()
+
+df_cna_arm_focal3 <- df_cna_arm_focal2 %>%
+  pivot_wider(names_from = cna_type,
+              values_from = n)
+
+head(df_cna_arm_focal3)
+
+df_sample_sampleid_figureid <- df_sample %>%
+  select(sampleid, figure_id)
+
+df_cna_arm_focal4 <- left_join(df_sample_sampleid_figureid, df_cna_arm_focal3, by = c("sampleid" = "sample"))
+
+summary(df_cna_arm_focal4)
+
+df_cna_arm_focal5 <- df_cna_arm_focal4 %>%
+  mutate(arm = replace_na(arm, 0),
+         focal = replace_na(focal, 0)) 
+
+
+
+head(df_cna_arm_focal5)
+
+CNA_order <- fct_relevel(df_cna_arm_focal5$figure_id, colnames(mat_mut))
+
+df_cna_arm_focal6 <- df_cna_arm_focal5 %>%
+  mutate(figure_id = CNA_order)
+
+
+df_cna_arm_focal7 <- df_cna_arm_focal6 %>%
+  pivot_longer(col = -c(sampleid, figure_id),
+               names_to = "cna_type",
+               values_to = "num"
+  )
+head(df_cna_arm_focal6)
+
+ggg <- df_cna_arm_focal7 %>%
+  ggplot() +
+  geom_bar(mapping = aes(x = figure_id,
+                         y = num,
+                         fill = cna_type),
+           stat = "identity",
+           color = "white",
+           width = 1) +
+  labs(x = "samples",
+       y = "No. of CNAs") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_manual(values = c("#708090", "#393F54")) +
+  scale_y_continuous(expand = c(0, 0),
+                     limits = c(0, 50)
+  ) +
+  scale_x_discrete(expand = expansion(mult = c(0,0)))
+
+ggg
+
+ggsave(str_glue("{dir_pdf}/{this_dataset_type}_arm_focal_cnas_num_barplot_{this_blc_cutoff}.pdf"))
+```
+
+```{r sessioninfo}
+sessionInfo()
+```
+
