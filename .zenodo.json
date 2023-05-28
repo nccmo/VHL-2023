@@ -1,0 +1,27 @@
+{
+    "description": "<p>\"Inter- and intra-tumor heterogeneity of genetic and immune profiles in inherited renal cell carcinoma\" by Tabata M et al.</p>", 
+    "license": "other-open", 
+    "title": "nccmo/VHL-2023: VHL-2023", 
+    "version": "VHL", 
+    "upload_type": "software", 
+    "publication_date": "2023-05-28", 
+    "creators": [
+        {
+            "affiliation": "National Cancer Center", 
+            "name": "Tabata M, et al."
+        }
+    ], 
+    "access_right": "open", 
+    "related_identifiers": [
+        {
+            "scheme": "url", 
+            "identifier": "https://github.com/nccmo/VHL-2023/tree/VHL", 
+            "relation": "isSupplementTo"
+        }, 
+        {
+            "scheme": "doi", 
+            "identifier": "10.5281/zenodo.7978841", 
+            "relation": "isVersionOf"
+        }
+    ]
+}
